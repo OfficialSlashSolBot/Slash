@@ -1,12 +1,11 @@
 import os
 import math
-import time 
+import time
 import boto3
 import base58
 import random
 import asyncio
 import logging
-import asyncio
 import aiomysql
 import warnings
 import threading
@@ -15,56 +14,54 @@ import aiofiles
 import datetime
 import pymysql.cursors
 from dotenv import load_dotenv
-from xxx_game import xxx_game
-from zzz_game import zzz_game
 from transfer import send_sol, send_sol_m, send_sol_e
+from xxx_game import small_game
+from zzz_game import large_game
+from zzz_game import zzz_game
 from balance import get_balance
 from solders.keypair import Keypair
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, CallbackContext, ContextTypes
-from dbcalls import (
-                        
-                        get_user_id,
-                        get_wallet_address_by_user_id,
-                        get_game_private_key,
-                        get_game_wallet,
-                        generate_wallet_if_needed,
-                        save_wallet_address_new,
-                        save_wallet_address,
-                        get_wallet_address,
-                        get_private_key,
-                        get_entries,
-                        get_entries2,
-                        get_total_users,
-                    )
+from database import (
+    get_user_id,
+    get_wallet_address_by_user_id,
+    get_game_private_key,
+    get_game_wallet,
+    generate_wallet_if_needed,
+    save_wallet_address_new,
+    save_wallet_address,
+    get_wallet_address,
+    get_private_key,
+    get_entries,
+    get_entries2,
+    get_total_users,
+)
 
 warnings.simplefilter("ignore")
 load_dotenv('.env')
 logging.basicConfig(level=logging.ERROR)
 
-TOKEN = os.getenv('TOKEN')  
-DB_NAME = os.getenv('DB_NAME')  
-DB_HOST = os.getenv('DB_HOST')  
-DB_USER = os.getenv('DB_USER')  
-DB_PASSWORD = os.getenv('DB_PASSWORD')
-GROUPID = int(os.getenv('TG_GROUP_ID')) 
-CHANNELID = int(os.getenv('TG_CHANNEL_ID')) 
-FEEWALLET = os.getenv('FEEWALLET')  
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+DB_NAME = os.getenv('DATABASE_NAME')
+DB_HOST = os.getenv('DATABASE_HOST')
+DB_USER = os.getenv('DATABASE_USER')
+DB_PASSWORD = os.getenv('DATABASE_PASSWORD')
+GROUPID = int(os.getenv('TELEGRAM_GROUP_ID', 0))
+CHANNELID = int(os.getenv('TELEGRAM_CHANNEL_ID', 0))
+FEEWALLET = os.getenv('FEE_WALLET_ADDRESS')
 END = 0
 AUTHORIZED_USER_ID = os.getenv('AUTHORIZED_USER_ID')
 bot = Bot(token=TOKEN)
-
 user_last_start_time = {}
-START_COMMAND_COOLDOWN = 3  
-MAX_START_COMMAND_COOLDOWN = 30  
-user_last_start_time = {}  
-user_spam_count = {}  
-user_notified = {}  
-video_filename1 = 'es.mp4'
-video_filename2 = 'er.mp4'
-video_filename3 = 'ms.mp4'
-video_filename4 = 'mr.mp4'
-
+START_COMMAND_COOLDOWN = 3
+MAX_START_COMMAND_COOLDOWN = 30
+user_spam_count = {}
+user_notified = {}
+processing_refunds = set()
+video_filename1 = 'small_start.mp4'
+video_filename2 = 'small_result.mp4'
+video_filename3 = 'large_start.mp4'
+video_filename4 = 'large_result.mp4'
 
 async def setup_database():
     pool = await aiomysql.create_pool(
@@ -95,7 +92,7 @@ async def setup_database():
             ''')
             
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS xyz_001 (
+                    CREATE TABLE IF NOT EXISTS game_small_001 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -106,10 +103,10 @@ async def setup_database():
                         wallet_address4 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'xyz_001'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_small_001'))
 
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS xyz_010 (
+                    CREATE TABLE IF NOT EXISTS game_small_010 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -120,10 +117,10 @@ async def setup_database():
                         wallet_address4 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'xyz_010'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_small_010'))
 
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS xyz_100 (
+                    CREATE TABLE IF NOT EXISTS game_small_100 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -134,10 +131,10 @@ async def setup_database():
                         wallet_address4 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'xyz_100'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_small_100'))
 
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS zyx_001 (
+                    CREATE TABLE IF NOT EXISTS game_large_001 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -176,10 +173,10 @@ async def setup_database():
                         wallet_address32 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'zyx_001'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_large_001'))
 
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS zyx_010 (
+                    CREATE TABLE IF NOT EXISTS game_large_010 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -218,10 +215,10 @@ async def setup_database():
                         wallet_address32 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'zyx_010'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_large_010'))
 
             await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS zyx_100 (
+                    CREATE TABLE IF NOT EXISTS game_large_100 (
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         wallet_address TEXT NOT NULL,
                         encrypted_private_key TEXT NOT NULL,
@@ -260,25 +257,24 @@ async def setup_database():
                         wallet_address32 TEXT DEFAULT NULL
                     )
                 ''')
-            await asyncio.shield(generate_wallet_if_needed(cursor, 'zyx_100'))
+            await asyncio.shield(generate_wallet_if_needed(cursor, 'game_large_100'))
 
     pool.close()
     await pool.wait_closed()
 
     tasks = [
-        monitor_and_select_winner("xyz_001"),
-        monitor_and_select_winner("xyz_010"),
-        monitor_and_select_winner("xyz_100"),
-        monitor_and_select_winner2("zyx_001"),
-        monitor_and_select_winner2("zyx_010"),
-        monitor_and_select_winner2("zyx_100")
+        monitor_and_select_winner("game_small_001"),
+        monitor_and_select_winner("game_small_010"),
+        monitor_and_select_winner("game_small_100"),
+        monitor_and_select_winner2("game_large_001"),
+        monitor_and_select_winner2("game_large_010"),
+        monitor_and_select_winner2("game_large_100")
     ]
     
     await asyncio.gather(*tasks)
 
 async def private_chat_only(update: Update, context: CallbackContext):
     if update.effective_chat.type != 'private':
-    
         return False
     return True
 
@@ -313,7 +309,6 @@ async def create_start_task(update: Update, context: CallbackContext) -> None:
     asyncio.create_task(start(update, context, user_id))
 
 async def start(update: Update, context: CallbackContext, user_id: int = None) -> None:
-
     if update and update.message and update.message.chat.type != "private":
         return
     if user_id and update and update.message and update.message.from_user.id != user_id:
@@ -329,13 +324,13 @@ async def start(update: Update, context: CallbackContext, user_id: int = None) -
             balance = await asyncio.shield(get_balance(wallet_address))
             balance_rounded = math.floor(balance * 1000) / 1000
             balance_formatted = f"{balance_rounded:.3f}"
-            welcome_message = (f"⚔ *Welcome to [BOT_NAME]!* ⚔\n\n"
+            welcome_message = (f"⚔ *Welcome to SlashBot!* ⚔\n\n"
                    f"An exciting *elimination game* where only the strongest survive!\n\n"
                    f"🎮 *Game Modes:*\n"
-                   f"• *Express* – Fast-paced, 4 players, winner takes all!\n"
-                   f"• *Mega* – 32 players, top 8 get paid!\n\n"
+                   f"• *Small* – Fast-paced, 4 players, winner takes all!\n"
+                   f"• *Large* – 32 players, top 8 get paid!\n\n"
                    f"🔹 *How It Works:*\n"
-                   f"• Each round, *50% of players are randomly [BOT_NAME]ed* until there's a winner.\n"
+                   f"• Each round, *50% of players are randomly slashed* until there's a winner.\n"
                    f"• *Deposit SOL* to your in-game balance.\n"
                    f"• *Choose your game mode* and join the battle.\n"
                    f"• *Wait for the round to start* and survive the eliminations!\n\n"
@@ -343,11 +338,11 @@ async def start(update: Update, context: CallbackContext, user_id: int = None) -
                    f"• *Balance:* {balance_formatted} SOL\n"
                    f"• *Wallet:* `{wallet_address}`\n"
                    f"• *Total Players:* {users}\n\n"
-                   f"⚡ *Let the [BOT_NAME]ing begin!*")
+                   f"⚡ *Let the slashing begin!*")
 
         else:
             private_key = Keypair()
-            new_wallet = private_key.pubkey()  
+            new_wallet = private_key.pubkey()
             private_key_str = str(private_key)
             new_wallet_str = str(new_wallet)
             earned = 0
@@ -357,13 +352,13 @@ async def start(update: Update, context: CallbackContext, user_id: int = None) -
             balance = 0.0
             balance_rounded = math.floor(balance * 1000) / 1000
             balance_formatted = f"{balance_rounded:.3f}"
-            welcome_message = (f"⚔ *Welcome to [BOT_NAME]!* ⚔\n\n"
+            welcome_message = (f"⚔ *Welcome to SlashBot!* ⚔\n\n"
                    f"An exciting *elimination game* where only the strongest survive!\n\n"
                    f"🎮 *Game Modes:*\n"
-                   f"• *Express* – Fast-paced, 4 players, winner takes all!\n"
-                   f"• *Mega* – 32 players, top 8 get paid!\n\n"
+                   f"• *Small* – Fast-paced, 4 players, winner takes all!\n"
+                   f"• *Large* – 32 players, top 8 get paid!\n\n"
                    f"🔹 *How It Works:*\n"
-                   f"• Each round, *50% of players are randomly [BOT_NAME]ed* until there's a winner.\n"
+                   f"• Each round, *50% of players are randomly slashed* until there's a winner.\n"
                    f"• *Deposit SOL* to your in-game balance.\n"
                    f"• *Choose your game mode* and join the battle.\n"
                    f"• *Wait for the round to start* and survive the eliminations!\n\n"
@@ -372,18 +367,18 @@ async def start(update: Update, context: CallbackContext, user_id: int = None) -
                    f"• *Wallet:* `{new_wallet_str}`\n"
                    f"Your Wallet was auto generated\n"
                    f"• *Total Players:* {users}\n\n"
-                   f"⚡ *Let the [BOT_NAME]ing begin!*")
-        entries_1 = await get_entries("xyz_001")
-        entries_2 = await get_entries("xyz_010")
-        entries_3 = await get_entries("xyz_100")
-        entries_4 = await get_entries2("zyx_001")
-        entries_5 = await get_entries2("zyx_010")
-        entries_6 = await get_entries2("zyx_100")
+                   f"⚡ *Let the slashing begin!*")
+        entries_1 = await get_entries("game_small_001")
+        entries_2 = await get_entries("game_small_010")
+        entries_3 = await get_entries("game_small_100")
+        entries_4 = await get_entries2("game_large_001")
+        entries_5 = await get_entries2("game_large_010")
+        entries_6 = await get_entries2("game_large_100")
         keyboard = [
-                [InlineKeyboardButton(f"🥷 MODE A 0.01 Sol ({entries_1}/4)", callback_data='xxx_4_001'),InlineKeyboardButton(f"🥷 MODE A 0.10 Sol ({entries_2}/4)", callback_data='xxx_4_010')],
-                [InlineKeyboardButton(f"🥷 MODE A 1.0 Sol ({entries_3}/4)", callback_data='xxx_4_100')],
-                [InlineKeyboardButton(f"🏆 MODE B 0.01 Sol ({entries_4}/32)", callback_data='zzz_32_001'),InlineKeyboardButton(f"🏆 MODE B 0.1 Sol ({entries_5}/32)", callback_data='zzz_32_010')],
-                [InlineKeyboardButton(f"🏆 MODE B 1.0 Sol ({entries_6}/32)", callback_data='zzz_32_100')],
+                [InlineKeyboardButton(f"🥷 Small-4 0.01 Sol ({entries_1}/4)", callback_data='small_game_001'),InlineKeyboardButton(f"🥷 Small-4 0.10 Sol ({entries_2}/4)", callback_data='small_game_010')],
+                [InlineKeyboardButton(f"🥷 Small-4 1.0 Sol ({entries_3}/4)", callback_data='small_game_100')],
+                [InlineKeyboardButton(f"🏆 Large-32 0.01 Sol ({entries_4}/32)", callback_data='large_game_001'),InlineKeyboardButton(f"🏆 Large-32 0.1 Sol ({entries_5}/32)", callback_data='large_game_010')],
+                [InlineKeyboardButton(f"🏆 Large-32 1.0 Sol ({entries_6}/32)", callback_data='large_game_100')],
                 [InlineKeyboardButton("How to Play?", callback_data='info'),InlineKeyboardButton("Wallet", callback_data='wallet')],
                 [InlineKeyboardButton("Transfer", callback_data='transfer_sol')],
             ]
@@ -396,8 +391,6 @@ async def start(update: Update, context: CallbackContext, user_id: int = None) -
     except Exception as e:
         logging.error(f"Error processing start command for user {user_id}: {e}")
     
-#CALLBACKS START
-
 async def button(update: Update, context: Application) -> None:
     query = update.callback_query
     await query.answer()
@@ -406,18 +399,18 @@ async def button(update: Update, context: Application) -> None:
 
         if query.data == 'info':
                         how_it_works_message = (
-                            "*⚔️ [BOT_NAME] - Telegram Elimination Game*\n\n"
-                            "[BOT_NAME]Bot is an action-packed *elimination game* on Telegram where players compete in knockout-style battles to win SOL rewards! Choose between *Express* and *Mega* game modes and climb your way to the top!\n\n"
+                            "*⚔️ SlashSolBot - Telegram Elimination Game*\n\n"
+                            "SlashBot is an action-packed *elimination game* on Telegram where players compete in knockout-style battles to win SOL rewards! Choose between *Small* and *Large* game modes and climb your way to the top!\n\n"
                             "*🎮 How to Play:*\n"
-                            "Join the *[BOT_NAME]* game via Telegram and battle it out in two exciting game modes:\n\n"
-                            "1️⃣ *Express* – 4 players, winner takes all!\n"
-                            "2️⃣ *Mega* – 32 players, top 8 get paid!\n\n"
+                            "Join the *SlashSolBot* game via Telegram and battle it out in two exciting game modes:\n\n"
+                            "1️⃣ *Small* – 4 players, winner takes all!\n"
+                            "2️⃣ *Large* – 32 players, top 8 get paid!\n\n"
                             "🔹 Games start automatically when all slots are filled.\n"
                             "🔹 Eliminate opponents and survive until the final round to win SOL prizes!\n\n"
-                            "*🔥 Express Mode:*\n"
+                            "*🔥 Small Mode:*\n"
                             "• *Fast & intense* – Only *2 rounds* of elimination\n"
                             "• *Winner takes all!* Earn *3.6x* your entry fee\n\n"
-                            "*💪 Mega Mode:*\n"
+                            "*💪 Large Mode:*\n"
                             "• *Survive 5 rounds* to secure your rewards\n"
                             "• *Prize Structure:*\n"
                             "  - 🥇 *1st place:* *14.3x* entry fee\n"
@@ -425,8 +418,8 @@ async def button(update: Update, context: Application) -> None:
                             "  - 🥉 *3rd-4th place:* *2x* entry fee\n"
                             "  - 🎖 *5th-8th place:* *1.55x* entry fee\n\n"
                             "*🚀 How to Join:*\n"
-                            "1. Open Telegram and search for *[BOT_NAME]*\n"
-                            "2. Join a game by selecting *Express* or *Mega* mode\n"
+                            "1. Open Telegram and search for *SlashSolBot*\n"
+                            "2. Join a game by selecting *Small* or *Large* mode\n"
                             "3. Place your bet, compete, and win rewards!\n\n"
                             "*⚡ Start Playing Now!*\n"
                             "Think you have what it takes to *eliminate the competition* and *claim the prize*? Join the battle now and let the games begin!"
@@ -436,57 +429,66 @@ async def button(update: Update, context: Application) -> None:
 
                         await start(update, context, user_id=user_id)
 
-        elif query.data == 'xxx_4_001':
+        elif query.data == 'small_game_001':
                 keyboard = [
-                    [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_xxx_4_001')],
-                    [InlineKeyboardButton("Cancel", callback_data='cancel_xyz_001')]
+                    [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_small_game_001')],
+                    [InlineKeyboardButton("Cancel", callback_data='cancel_game_small_001')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
-                    "You're about to enter a game of EXPRESS [BOT_NAME] for 0.01 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                    "You're about to enter a game of SMALL SLASH for 0.01 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                     reply_markup=reply_markup
                 )
 
-        elif query.data == 'xxx_4_010':
+        elif query.data == 'small_game_010':
                 keyboard = [
-                    [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_xxx_4_010')],
-                    [InlineKeyboardButton("Cancel", callback_data='cancel_xyz_010')]
+                    [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_small_game_010')],
+                    [InlineKeyboardButton("Cancel", callback_data='cancel_game_small_010')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
-                    "You're about to enter a game of EXPRESS [BOT_NAME] for 0.10 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                    "You're about to enter a game of SMALL SLASH for 0.10 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                     reply_markup=reply_markup
                 )
 
-        elif query.data == 'xxx_4_100':
+        elif query.data == 'small_game_100':
                 keyboard = [
-                    [InlineKeyboardButton("No", callback_data='no_deposit'), InlineKeyboardButton("Yes", callback_data='yes_xxx_4_100')],
-                    [InlineKeyboardButton("Cancel", callback_data='cancel_xyz_100')]
+                    [InlineKeyboardButton("No", callback_data='no_deposit'), InlineKeyboardButton("Yes", callback_data='yes_small_game_100')],
+                    [InlineKeyboardButton("Cancel", callback_data='cancel_game_small_100')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
-                    "You're about to enter a game of EXPRESS [BOT_NAME] for 1.0 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                    "You're about to enter a game of SMALL SLASH for 1.0 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                     reply_markup=reply_markup
                 )
 
         elif query.data.startswith('cancel_'):
+            if user_id in processing_refunds:
+                await query.edit_message_text("Please wait, your refund is already being processed.")
+                return
+
+            processing_refunds.add(user_id)
+
+            try:
                 await query.edit_message_text("Checking for entries...")
-                tablename = query.data.split('_')[1:]  
+                tablename = query.data.split('_')[1:]
                 table_name = "_".join(tablename)
                 user_wallet = await get_wallet_address_by_user_id(user_id)
                 entry_exists = await check_entry(table_name, user_wallet)
                 await asyncio.sleep(2)
+
                 if entry_exists['success']:
                     await query.edit_message_text("Processing refund...")
                     entries = entry_exists['entries']
                     try:
-                        number = int(table_name[-3:])  
+                        number = int(table_name[-3:])
                     except ValueError:
-                        number = 0  
+                        number = 0
                     amount = (number / 100) * entries * 0.9
                     from_wallet = await get_game_wallet(table_name)
                     pk = await get_game_private_key(table_name)
                     refund_result = await send_sol(user_wallet, from_wallet, pk, amount)
+
                     if refund_result['success']:
                         signature = refund_result['result']
                         remove_result = await remove_entry(table_name, user_wallet)
@@ -511,12 +513,14 @@ async def button(update: Update, context: Application) -> None:
                         text="You do not have any entries to refund or there was an error, please try again.",
                         parse_mode='Markdown'
                     )
-                    
                     await start(update, context, user_id=user_id)
+
+            finally:
+                processing_refunds.remove(user_id)
  
-        elif query.data.startswith('yes_xxx_4_'):
+        elif query.data.startswith('yes_small_game_'):
             entry_fee = query.data.split('_')[-1]
-            table_name = f"xyz_{entry_fee}"
+            table_name = f"game_small_{entry_fee}"
             table_wallet = await get_game_wallet(table_name)
             pk = await get_private_key(user_id)
             user_wallet = await get_wallet_address_by_user_id(user_id)
@@ -585,42 +589,42 @@ async def button(update: Update, context: Application) -> None:
                 await query.edit_message_text("You do not have enough Sol to enter")
                 await start(update, context, user_id=user_id)
 
-        elif query.data == 'zzz_32_001':
+        elif query.data == 'large_game_001':
                         keyboard = [
-                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_zzz_32_001')],
-                            [InlineKeyboardButton("Cancel", callback_data='cancel_zyx_001')]
+                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_large_game_001')],
+                            [InlineKeyboardButton("Cancel", callback_data='cancel_game_large_001')]
                         ]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         await query.edit_message_text(
-                            "You're about to enter a game of MEGA [BOT_NAME] for 0.01 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                            "You're about to enter a game of LARGE SLASH for 0.01 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                             reply_markup=reply_markup
                         )
         
-        elif query.data == 'zzz_32_010':
+        elif query.data == 'large_game_010':
                         keyboard = [
-                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_zzz_32_010')],
-                            [InlineKeyboardButton("Cancel", callback_data='cancel_zyx_010')]
+                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_large_game_010')],
+                            [InlineKeyboardButton("Cancel", callback_data='cancel_game_large_010')]
                         ]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         await query.edit_message_text(
-                            "You're about to enter a game of MEGA [BOT_NAME] for 0.10 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                            "You're about to enter a game of LARGE SLASH for 0.10 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                             reply_markup=reply_markup
                         )
         
-        elif query.data == 'zzz_32_100':
+        elif query.data == 'large_game_100':
                         keyboard = [
-                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_zzz_32_100')],
-                            [InlineKeyboardButton("Cancel", callback_data='cancel_zyx_100')]
+                            [InlineKeyboardButton("No", callback_data='no_deposit'),InlineKeyboardButton("Yes", callback_data='yes_large_game_100')],
+                            [InlineKeyboardButton("Cancel", callback_data='cancel_game_large_100')]
                         ]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         await query.edit_message_text(
-                            "You're about to enter a game of EXPRESS [BOT_NAME] for 1.0 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
+                            "You're about to enter a game of LARGE SLASH for 1.0 Sol!!\n\nWould you like to proceed?\n\nOr click Cancel to remove your entries from the game (this will incur a 10% penalty fee).",
                             reply_markup=reply_markup
                         )
 
-        elif query.data.startswith('yes_zzz_32_'):
+        elif query.data.startswith('yes_large_game_'):
             entry_fee = query.data.split('_')[-1]
-            table_name = f"zyx_{entry_fee}"
+            table_name = f"game_large_{entry_fee}"
             table_wallet = await get_game_wallet(table_name)
             pk = await get_private_key(user_id)
             user_wallet = await get_wallet_address_by_user_id(user_id)
@@ -713,7 +717,7 @@ async def button(update: Update, context: Application) -> None:
                 message = await query.edit_message_text(
                     f"YOUR PRIVATE KEY: ||{private_key}||\n\n"
                     f"This message will self destruct in 15 seconds",
-                    parse_mode="MarkdownV2" 
+                    parse_mode="MarkdownV2"
                 )
                 await asyncio.sleep(15)
                 await context.bot.delete_message(chat_id=message.chat_id, message_id=message.message_id)
@@ -850,7 +854,7 @@ async def transfer_sol(update: Update, context: Application, user_id: int, handl
         await update.message.reply_text("Invalid public key format. Please retry.")
         return
 
-    if len(public_key_hex) == 64:  
+    if len(public_key_hex) == 64:
         to_wallet = public_key_base58
         sk = await get_private_key(user_id)
         wallet_address = await get_wallet_address(user_id)
@@ -882,8 +886,8 @@ async def transfer_sol(update: Update, context: Application, user_id: int, handl
     context.application.remove_handler(handler)
     await start(update, context)
 
-async def save_game_results_e(game_number, results, tablename, entry_amount, prize_amount):
-    filename = "xxx_game_results.json"
+async def save_game_results_small(game_number, results, tablename, entry_amount, prize_amount):
+    filename = "small_game_results.json"
     game_data = {
         "game_number": game_number,
         "tablename": tablename,
@@ -914,7 +918,6 @@ async def save_game_results_e(game_number, results, tablename, entry_amount, pri
         await f.write(json.dumps(data, indent=2))
 
 async def monitor_and_select_winner(tablename: str):
-
     entry_amount = int(tablename.split('_')[-1]) / 100
     prize_amount = round((entry_amount*3.6),3)
     pool = await aiomysql.create_pool(
@@ -925,7 +928,7 @@ async def monitor_and_select_winner(tablename: str):
         autocommit=True
     )
 
-    filename = "xxx_game_results.json"
+    filename = "small_game_results.json"
     if os.path.exists(filename):
         async with aiofiles.open(filename, 'r') as f:
             content = await f.read()
@@ -964,10 +967,10 @@ async def monitor_and_select_winner(tablename: str):
                                         print(f"Failed to notify user {user_id}: {e}")
                                     notified_wallets.add(user_id)
                             
-                            game_results = await xxx_game(tablename)
+                            game_results = await small_game(tablename)
                             if game_results:
                                 entry_list = "\n".join([f"[{addr[:4]}...{addr[-4:]}](https://solscan.io/account/{addr})" for addr in result if addr != 'reserved'])
-                                round1_start_msg = f"Express Game {game_number}\n\nRound 1 for Express [BOT_NAME] starting: \n\nWallets:\n{entry_list}\n\n*Prize:* {prize_amount} Sol\n*Entry Fee:* {entry_amount} Sol"
+                                round1_start_msg = f"Small Game {game_number}\n\nRound 1 for Small Slash starting: \n\nWallets:\n{entry_list}\n\n*Prize:* {prize_amount} Sol\n*Entry Fee:* {entry_amount} Sol"
                                 await bot.send_video(
                                                                 chat_id=CHANNELID,
                                                                 video=open(video_filename1, 'rb'),
@@ -987,7 +990,7 @@ async def monitor_and_select_winner(tablename: str):
                                         await asyncio.sleep(3)
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                     except Exception as e:
                                         print(f"Failed to send Round 1 start message to {user_id}: {e}")
@@ -1004,8 +1007,8 @@ async def monitor_and_select_winner(tablename: str):
                                             elif line.strip():
                                                 wallet = line.strip()
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        formatted_display.insert(1, '')  
-                                        formatted_display.insert(5, '')  
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(5, '')
                                         await bot.send_message(
                                             chat_id=user_id, 
                                             text="\n".join(formatted_display),
@@ -1021,7 +1024,7 @@ async def monitor_and_select_winner(tablename: str):
                                         await bot.send_message(chat_id=user_id, text="Round 2 is about to start!", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                     except Exception as e:
                                         print(f"Failed to send next Round start message to {user_id}: {e}")
@@ -1052,12 +1055,12 @@ async def monitor_and_select_winner(tablename: str):
                                         print(f"Failed to send final round results to {user_id}: {e}")
                                 await asyncio.sleep(3)
                                 final_results_msg = (
-                                    f"Express Game {game_number}\n\n"
+                                    f"Small Game {game_number}\n\n"
                                     "*GAME SUMMARY*\n\n"
-                                    "*Round 1 [BOT_NAME]ed Wallets:*\n" +
+                                    "*Round 1 Slashed Wallets:*\n" +
                                     "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
                                             for wallet in game_results['round1']['eliminated']]) +
-                                    "\n\n*Round 2 [BOT_NAME]ed Wallet:*\n" +
+                                    "\n\n*Round 2 Slashed Wallet:*\n" +
                                     "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
                                             for wallet in game_results['final_round']['eliminated']]) +
                                     f"\n\n*First Place Won {prize_amount} Sol:* \n\n[{game_results['final_round']['winner'][:4]}...{game_results['final_round']['winner'][-4:]}](https://solscan.io/account/{game_results['final_round']['winner']})"
@@ -1083,8 +1086,10 @@ async def monitor_and_select_winner(tablename: str):
                                 if send_e_prize["success"]:
                                     signature = send_e_prize["result"]
                                 winner_id = await get_user_id(winner)
+                                round_1_eliminated = game_results['round1']['eliminated']
                                 final_eliminated = game_results['final_round']['eliminated']
-                                for loser in final_eliminated:
+                                all_losers = set(round_1_eliminated + final_eliminated)
+                                for loser in all_losers:
                                     loser_id = await get_user_id(loser)
                                     if loser_id and loser_id != winner_id:
                                         try:
@@ -1102,7 +1107,7 @@ async def monitor_and_select_winner(tablename: str):
                                         print(f"Failed to notify winner {winner_id}: {e}")
 
                             game_results['participants'] = [addr for addr in result if addr != 'reserved']
-                            await save_game_results_e(game_number, game_results, tablename, entry_amount, prize_amount)
+                            await save_game_results_small(game_number, game_results, tablename, entry_amount, prize_amount)
                             game_number += 1 
 
                             await cursor.execute(f'''
@@ -1115,7 +1120,7 @@ async def monitor_and_select_winner(tablename: str):
                                 WHERE id = 1
                             ''')
 
-            await asyncio.sleep(10) 
+            await asyncio.sleep(10)
 
     except Exception as e:
         print(f"An error occurred while monitoring {tablename}: {e}")
@@ -1123,8 +1128,8 @@ async def monitor_and_select_winner(tablename: str):
         pool.close()
         await pool.wait_closed()
 
-async def save_zzz_game_results(game_number, results, tablename, prize_amount1, prize_amount2, prize_amount3, prize_amount4):
-    filename = "zzz_game_results.json"
+async def save_game_results_large(game_number, results, tablename, prize_amount1, prize_amount2, prize_amount3, prize_amount4):
+    filename = "large_game_results.json"
     game_data = {
         "game_number": game_number,
         "tablename": tablename,
@@ -1167,7 +1172,6 @@ async def save_zzz_game_results(game_number, results, tablename, prize_amount1, 
         await f.write(json.dumps(data, indent=2))
 
 async def monitor_and_select_winner2(tablename: str):
-
     entry_amount = int(tablename.split('_')[-1]) / 100
     prize_amount1 = round((entry_amount * 14.3), 3)
     prize_amount2 = round((entry_amount * 4.3), 3)
@@ -1181,7 +1185,7 @@ async def monitor_and_select_winner2(tablename: str):
         autocommit=True
     )
 
-    filename = "zzz_game_results.json"
+    filename = "large_game_results.json"
     if os.path.exists(filename):
         async with aiofiles.open(filename, 'r') as f:
             content = await f.read()
@@ -1225,73 +1229,61 @@ async def monitor_and_select_winner2(tablename: str):
                                     except Exception as e:
                                         print(f"Failed to notify user {user_id}: {e}")
                                     notified_wallets.add(user_id)
-                            game_results = await zzz_game(tablename)
+                            game_results = await large_game(tablename)
                             if game_results:
-                                entry_list = "\n".join([addr for addr in result if addr != 'reserved'])
                                 entry_list = "\n".join([f"[{addr[:4]}...{addr[-4:]}](https://solscan.io/account/{addr})" for addr in result if addr != 'reserved'])
-                                round1_start_msg = f"Express Game {game_number}\n\nExpress Game {game_number}\n\nRound 1 for Mega [BOT_NAME] starting: \n\nWallets:\n{entry_list}\n\n*Entry Fee:* {entry_amount} Sol\n*Prize:* 🥇{prize_amount1} 🥈{prize_amount2}  3️⃣4️⃣{prize_amount3}  5️⃣8️⃣{prize_amount4} Sol"
+                                round1_start_msg = f"Large Game {game_number}\n\nRound 1 for Large Slash starting: \n\nWallets:\n{entry_list}\n\n*Entry Fee:* {entry_amount} Sol\n*Prize:* 🥇{prize_amount1} 🥈{prize_amount2}  3️⃣4️⃣{prize_amount3}  5️⃣8️⃣{prize_amount4} Sol"
                                 await bot.send_video(
                                                                 chat_id=CHANNELID,
                                                                 video=open(video_filename3, 'rb'),
                                                                 caption=round1_start_msg,
                                                                 parse_mode="Markdown"
                                                             )
-                                #ROUND 1
                                 for user_id in notified_wallets:
                                     try:
-                                        
                                         await bot.send_video(
                                             chat_id=user_id,
                                             video = open(video_filename3, 'rb'),
-                                            caption=round1_start_msg, 
-                                            parse_mode='Markdown', 
-                                            disable_web_page_preview=True
+                                            caption=round1_start_msg,
+                                            parse_mode='Markdown'
                                         )
                                         await asyncio.sleep(3)
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(5)
-
                                     except Exception as e:
                                         print(f"Failed to send Round 1 start message to {user_id}: {e}")
                                 for user_id in notified_wallets:
                                     try:
                                         display_lines = game_results['round1']['display'].split('\n')
                                         formatted_display = []
-
                                         for line in display_lines:
                                             if line.startswith('Round 1 results:'):
                                                 formatted_display.append(line.strip())
                                             elif line.startswith('*Eliminated:') or line.startswith('*Advance to next round'):
-                                                formatted_display.append(line.replace('*', '').strip())  
-                                            elif line.strip():  
+                                                formatted_display.append(line.replace('*', '').strip())
+                                            elif line.strip():
                                                 wallet = line.strip()
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        
-                                        
-                                        formatted_display.insert(1, '') 
-                                        formatted_display.insert(19, '')  
-                                        
-
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(19, '')
                                         await bot.send_message(
-                                            chat_id=user_id, 
+                                            chat_id=user_id,
                                             text="\n".join(formatted_display),
-                                            parse_mode='Markdown', 
+                                            parse_mode='Markdown',
                                             disable_web_page_preview=True
                                         )
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send Round 1 results to {user_id}: {e}")
-
-                                #ROUND 2
                                 for user_id in notified_wallets:
                                     try:
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_message(chat_id=user_id, text="Round 2 is about to start!", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send next Round start message to {user_id}: {e}")
@@ -1299,35 +1291,32 @@ async def monitor_and_select_winner2(tablename: str):
                                     try:
                                         display_lines = game_results['round2']['display'].split('\n')
                                         formatted_display = []
-
                                         for line in display_lines:
                                             if line.startswith('Round 2 results:'):
                                                 formatted_display.append(line.strip())
                                             elif line.startswith('*Eliminated:') or line.startswith('*Advance to next round'):
-                                                formatted_display.append(line.replace('*', '').strip()) 
-                                            elif line.strip():  
+                                                formatted_display.append(line.replace('*', '').strip())
+                                            elif line.strip():
                                                 wallet = line.strip()
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        formatted_display.insert(1, '') 
-                                        formatted_display.insert(11, '')  
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(11, '')
                                         await bot.send_message(
-                                            chat_id=user_id, 
+                                            chat_id=user_id,
                                             text="\n".join(formatted_display),
-                                            parse_mode='Markdown', 
+                                            parse_mode='Markdown',
                                             disable_web_page_preview=True
                                         )
                                         await asyncio.sleep(5)
                                     except Exception as e:
-                                        print(f"Failed to send Round 1 results to {user_id}: {e}")
-
-                                #ROUND 3 
+                                        print(f"Failed to send Round 2 results to {user_id}: {e}")
                                 for user_id in notified_wallets:
                                     try:
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_message(chat_id=user_id, text="Round 3 is about to start!", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send next Round start message to {user_id}: {e}")
@@ -1339,30 +1328,28 @@ async def monitor_and_select_winner2(tablename: str):
                                             if line.startswith('Round 3 results:'):
                                                 formatted_display.append(line.strip())
                                             elif line.startswith('*Eliminated:') or line.startswith('*Advance to next round'):
-                                                formatted_display.append(line.replace('*', '').strip()) 
-                                            elif line.strip(): 
+                                                formatted_display.append(line.replace('*', '').strip())
+                                            elif line.strip():
                                                 wallet = line.strip()
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        formatted_display.insert(1, '')  
-                                        formatted_display.insert(7, '') 
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(7, '')
                                         await bot.send_message(
-                                            chat_id=user_id, 
+                                            chat_id=user_id,
                                             text="\n".join(formatted_display),
-                                            parse_mode='Markdown',  
+                                            parse_mode='Markdown',
                                             disable_web_page_preview=True
                                         )
                                         await asyncio.sleep(5)
                                     except Exception as e:
-                                        print(f"Failed to send Round 1 results to {user_id}: {e}")
-                                
-                                #ROUND 4
+                                        print(f"Failed to send Round 3 results to {user_id}: {e}")
                                 for user_id in notified_wallets:
                                     try:
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_message(chat_id=user_id, text="Round 4 is about to start!", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send next Round start message to {user_id}: {e}")
@@ -1370,36 +1357,32 @@ async def monitor_and_select_winner2(tablename: str):
                                     try:
                                         display_lines = game_results['round4']['display'].split('\n')
                                         formatted_display = []
-
                                         for line in display_lines:
                                             if line.startswith('Round 4 results:'):
                                                 formatted_display.append(line.strip())
                                             elif line.startswith('*Eliminated:') or line.startswith('*Advance to next round'):
-                                                formatted_display.append(line.replace('*', '').strip())  
-                                            elif line.strip():  
+                                                formatted_display.append(line.replace('*', '').strip())
+                                            elif line.strip():
                                                 wallet = line.strip()
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        
-                                        formatted_display.insert(1, '') 
-                                        formatted_display.insert(5, '')  
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(5, '')
                                         await bot.send_message(
-                                            chat_id=user_id, 
+                                            chat_id=user_id,
                                             text="\n".join(formatted_display),
-                                            parse_mode='Markdown',  
+                                            parse_mode='Markdown',
                                             disable_web_page_preview=True
                                         )
                                         await asyncio.sleep(5)
                                     except Exception as e:
-                                        print(f"Failed to send Round 1 results to {user_id}: {e}")
-
-                                #FINAL ROUND
+                                        print(f"Failed to send Round 4 results to {user_id}: {e}")
                                 for user_id in notified_wallets:
                                     try:
                                         send_sticker = "CAACAgIAAxkBAAExsbdnrNePZPbQ7CsFKxIxl7PmC1ILSgACGAEAAlKJkSNb3Pli_y_o4zYE"
                                         await bot.send_message(chat_id=user_id, text="Round 5 Final Round about to start!", parse_mode='Markdown')
                                         await asyncio.sleep(3)
                                         await bot.send_sticker(sticker=send_sticker, chat_id=user_id)
-                                        await bot.send_message(chat_id=user_id, text="[BOT_NAME]ing 50% of wallets randomly", parse_mode='Markdown')
+                                        await bot.send_message(chat_id=user_id, text="Slashing 50% of wallets randomly", parse_mode='Markdown')
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send next Round start message to {user_id}: {e}")
@@ -1407,7 +1390,6 @@ async def monitor_and_select_winner2(tablename: str):
                                     try:
                                         display_lines = game_results['round5']['display'].split('\n')
                                         formatted_display = []
-
                                         for line in display_lines:
                                             if line.startswith('Round 5 results:'):
                                                 formatted_display.append("Final Round Results")
@@ -1415,41 +1397,40 @@ async def monitor_and_select_winner2(tablename: str):
                                                 formatted_display.append(line.replace('*', '').strip())
                                             elif line.startswith('*Advance to next round*'):
                                                 formatted_display.append("Winner:")
-                                            elif line.strip() and not line.startswith('*'): 
+                                            elif line.strip() and not line.startswith('*'):
                                                 wallet = line.strip()
-                                                
                                                 formatted_display.append(f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})")
-                                        formatted_display.insert(1, '')  
-                                        formatted_display.insert(4, '') 
+                                        formatted_display.insert(1, '')
+                                        formatted_display.insert(4, '')
                                         await bot.send_message(
-                                            chat_id=user_id, 
+                                            chat_id=user_id,
                                             text="\n".join(formatted_display),
-                                            parse_mode='Markdown',  
+                                            parse_mode='Markdown',
                                             disable_web_page_preview=True
                                         )
                                         await asyncio.sleep(5)
                                     except Exception as e:
                                         print(f"Failed to send Round 5 results to {user_id}: {e}")
                                 winner = game_results['round5']['remaining'][0]
-                                final_results_msg = (f"Mega Game {game_number}\n\n"
+                                final_results_msg = (f"Large Game {game_number}\n\n"
                                     "*GAME SUMMARY*\n\n"
-                                    "*Round 1 [BOT_NAME]ed Wallets:*\n" +
-                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
+                                    "*Round 1 Slashed Wallets:*\n" +
+                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})"
                                             for wallet in game_results['round1']['eliminated']]) +
-                                    "\n\n*Round 2 [BOT_NAME]ed Wallets:*\n" +
-                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
+                                    "\n\n*Round 2 Slashed Wallets:*\n" +
+                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})"
                                             for wallet in game_results['round2']['eliminated']]) +
                                     f"\n\n*Round 3 Winners Won {prize_amount4} Sol:*\n" +
-                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
+                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})"
                                             for wallet in game_results['round3']['eliminated']]) +
                                     f"\n\n*Round 4 Winners Won {prize_amount3} Sol:*\n" +
-                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
+                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})"
                                             for wallet in game_results['round4']['eliminated']]) +
                                     f"\n\n*Second Place Won {prize_amount2} Sol:*\n" +
-                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})" 
+                                    "\n".join([f"[{wallet[:4]}...{wallet[-4:]}](https://solscan.io/account/{wallet})"
                                             for wallet in game_results['round5']['eliminated']]) +
                                     f"\n\n*First Place Won {prize_amount1} Sol:*\n" +
-                                    "\n".join([f"[{winner[:4]}...{winner[-4:]}](https://solscan.io/account/{winner})" 
+                                    "\n".join([f"[{winner[:4]}...{winner[-4:]}](https://solscan.io/account/{winner})"
                                             for winner in game_results['round5']['remaining']])
                                 )
                                 await bot.send_video(
@@ -1489,17 +1470,17 @@ async def monitor_and_select_winner2(tablename: str):
                                 seventh_id = await get_user_id(seventh)
                                 eighth_id = await get_user_id(eighth)
                                 winner_amount = round(entry_amount * 14.3, 3)
-                                second_amount = round(entry_amount * 4.3, 3) 
+                                second_amount = round(entry_amount * 4.3, 3)
                                 third_forth_amount = round(entry_amount * 2, 3)
                                 fifth_eighth_amount = round(entry_amount * 1.55, 3)
-                                game_results['participants'] = []  
-                                await save_zzz_game_results(game_number, game_results, tablename, winner_amount, second_amount, third_forth_amount, fifth_eighth_amount)
-                                game_number += 1  
+                                game_results['participants'] = []
+                                await save_game_results_large(game_number, game_results, tablename, winner_amount, second_amount, third_forth_amount, fifth_eighth_amount)
+                                game_number += 1
                                 
                                 for i in range(1, 3):
                                     for loser in game_results[f'round{i}']['eliminated']:
                                         loser_id = await get_user_id(loser)
-                                        if loser_id and loser_id not in [winner_id, second_amount, third_id, forth_id, fifth_id, sixth_id, seventh_id, eighth_id]:  
+                                        if loser_id and loser_id not in [winner_id, second_amount, third_id, forth_id, fifth_id, sixth_id, seventh_id, eighth_id]:
                                             try:
                                                 await bot.send_message(chat_id=loser_id, text="You did not win this time. Better luck next round!", parse_mode='Markdown')
                                             except Exception as e:
@@ -1510,7 +1491,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=winner_id, text=(
                                                                                     f"Congratulations! You've won this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {winner_amount} Sol"), 
+                                                                                    f"*Prize:* {winner_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {winner_id}: {e}")
@@ -1520,7 +1501,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=second_id, text=(
                                                                                     f"Congratulations! You've came 2nd this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {second_amount} Sol"), 
+                                                                                    f"*Prize:* {second_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {second_id}: {e}")
@@ -1530,7 +1511,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=third_id, text=(
                                                                                     f"Congratulations! You've came 3rd this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {third_forth_amount} Sol"), 
+                                                                                    f"*Prize:* {third_forth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {third_id}: {e}")
@@ -1540,7 +1521,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=forth_id, text=(
                                                                                     f"Congratulations! You've came 4th this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {third_forth_amount} Sol"), 
+                                                                                    f"*Prize:* {third_forth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {forth_id}: {e}")
@@ -1550,7 +1531,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=fifth_id, text=(
                                                                                     f"Congratulations! You've came 5th this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"), 
+                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {fifth_id}: {e}")
@@ -1560,7 +1541,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=sixth_id, text=(
                                                                                     f"Congratulations! You've came 6th this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"), 
+                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {sixth_id}: {e}")
@@ -1570,7 +1551,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=seventh_id, text=(
                                                                                     f"Congratulations! You've came 7th this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"), 
+                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {seventh_id}: {e}")
@@ -1580,7 +1561,7 @@ async def monitor_and_select_winner2(tablename: str):
                                         await bot.send_message(chat_id=eighth_id, text=(
                                                                                     f"Congratulations! You've came 8th this round!\n\n"
                                                                                     f"[TX](https://solscan.io/tx/{signature})\n"
-                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"), 
+                                                                                    f"*Prize:* {fifth_eighth_amount} Sol"),
                                                                                     parse_mode='Markdown',disable_web_page_preview = True)
                                     except Exception as e:
                                         print(f"Failed to notify winner {eighth_id}: {e}")
@@ -1623,13 +1604,14 @@ async def monitor_and_select_winner2(tablename: str):
                                 WHERE id = 1
                             ''')
 
-            await asyncio.sleep(10)  
+            await asyncio.sleep(10)
 
     except Exception as e:
         print(f"An error occurred while monitoring {tablename}: {e}")
     finally:
         pool.close()
         await pool.wait_closed()
+ 
 
 async def import_wallet(update: Update, context: Application, user_id: int, handler: MessageHandler) -> None:
 
